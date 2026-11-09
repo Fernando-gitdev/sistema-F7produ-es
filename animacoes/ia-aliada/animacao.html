@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>I.A. aliada</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Animação: "podemos usar I.A. para explorar ideias, encontrar alternativas e acelerar o trabalho"
+// Tom positivo: humano + I.A. trabalhando juntos. Sem legenda.
+// render(t) desenha o quadro no instante t (segundos).
+const DURATION = 17.5;
+const W = 1080, H = 1920;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const FONT = '"DejaVu Sans", "Liberation Sans", Arial, sans-serif';
+const C = {
+  white: '#F5F5F5', cyan: '#4FD1FF', yellow: '#FFD54A', gold: '#E9B85A',
+  pink: '#FF6B9A', green: '#4ADE80'
+};
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => x * x * (3 - 2 * x);
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const back = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const lerp = (a, b, k) => a + (b - a) * k;
+const lerpP = (p, q, k) => ({ x: lerp(p.x, q.x, k), y: lerp(p.y, q.y, k) });
+function rand(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+function noGlow() { ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; }
+
+
+// ---------- ícones ----------
+function drawHeart(x, y, s, a, color = C.pink) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 20); ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 14);
+  ctx.bezierCurveTo(-34, -8, -18, -34, 0, -16);
+  ctx.bezierCurveTo(18, -34, 34, -8, 0, 14);
+  ctx.fill();
+  ctx.restore();
+}
+function drawStar(x, y, s, a, color = C.yellow, points = 5, inner = 0.45) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 20); ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 ? 26 * inner : 26;
+    const ang = -Math.PI / 2 + i * Math.PI / points;
+    ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawSparkle(x, y, s, a, color = '#FFFFFF') { drawStar(x, y, s, a, color, 4, 0.25); }
+function drawCrown(x, y, s, a, color = C.gold) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 22); ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-40, 18); ctx.lineTo(-44, -20); ctx.lineTo(-22, 0); ctx.lineTo(0, -30);
+  ctx.lineTo(22, 0); ctx.lineTo(44, -20); ctx.lineTo(40, 18); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#FFF4D0';
+  for (const px of [-44, 0, 44]) { ctx.beginPath(); ctx.arc(px, px ? -22 : -32, 6, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+function drawBulb(x, y, s, a, on) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  ctx.lineWidth = 6; ctx.lineCap = 'round';
+  const col = on > 0 ? C.yellow : '#888';
+  if (on > 0) {
+    glow(C.yellow, 40 * on);
+    ctx.fillStyle = `rgba(255,213,74,${0.85 * on})`;
+    ctx.beginPath(); ctx.arc(0, -12, 32, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.yellow;
+    for (let i = 0; i < 7; i++) {
+      const ang = -Math.PI + i * Math.PI / 6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * 48, -12 + Math.sin(ang) * 48);
+      ctx.lineTo(Math.cos(ang) * (48 + 22 * on), -12 + Math.sin(ang) * (48 + 22 * on));
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = col;
+  ctx.beginPath(); ctx.arc(0, -12, 32, 0, Math.PI * 2); ctx.stroke();
+  noGlow(); ctx.strokeStyle = '#BBB';
+  ctx.beginPath(); ctx.moveTo(-14, 28); ctx.lineTo(14, 28); ctx.moveTo(-12, 38); ctx.lineTo(12, 38); ctx.stroke();
+  ctx.restore();
+}
+// ícones que orbitam a I.A. (o "conhecimento" dela)
+function drawOrbitIcon(kind, x, y, s, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  ctx.strokeStyle = C.cyan; ctx.fillStyle = C.cyan; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(C.cyan, 22);
+  if (kind === 0) { // balão de chat
+    roundRect(-42, -30, 84, 58, 16); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-18, 28); ctx.lineTo(-26, 46); ctx.lineTo(0, 28); ctx.stroke();
+    for (const dx of [-18, 0, 18]) { ctx.beginPath(); ctx.arc(dx, -1, 5, 0, Math.PI * 2); ctx.fill(); }
+  } else if (kind === 1) { // engrenagem
+    for (let i = 0; i < 8; i++) {
+      const ang = i * Math.PI / 4;
+      ctx.beginPath(); ctx.moveTo(Math.cos(ang) * 26, Math.sin(ang) * 26); ctx.lineTo(Math.cos(ang) * 40, Math.sin(ang) * 40);
+      ctx.lineWidth = 11; ctx.stroke();
+    }
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.stroke();
+  } else if (kind === 2) { // globo
+    ctx.beginPath(); ctx.arc(0, 0, 38, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, 15, 38, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(38, 0); ctx.moveTo(-32, -18); ctx.lineTo(32, -18); ctx.moveTo(-32, 18); ctx.lineTo(32, 18); ctx.stroke();
+  } else { // código
+    ctx.font = `bold 46px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('</>', 0, 2);
+  }
+  ctx.restore();
+}
+
+// ---------- boneco palito ----------
+function makePose(x, foot, o) {
+  const think = o.think || 0, up = o.armsUp || 0, tilt = o.tilt || 0;
+  const hip = { x, y: foot - 165 };
+  const sh = { x, y: hip.y - 190 };
+  const head = { x: sh.x + tilt * 10, y: sh.y - 62 };
+  let handL = { x: sh.x - 85, y: sh.y + 150 }, elbowL = { x: sh.x - 52, y: sh.y + 80 };
+  let handR = { x: sh.x + 85, y: sh.y + 150 }, elbowR = { x: sh.x + 52, y: sh.y + 80 };
+  // pose pensativa: mão no queixo
+  handR = lerpP(handR, { x: head.x + 22, y: head.y + 56 }, think);
+  elbowR = lerpP(elbowR, { x: sh.x + 78, y: sh.y + 82 }, think);
+  // braços para cima (comemorando)
+  handL = lerpP(handL, { x: sh.x - 105, y: sh.y - 110 }, up);
+  elbowL = lerpP(elbowL, { x: sh.x - 70, y: sh.y - 40 }, up);
+  handR = lerpP(handR, { x: sh.x + 105, y: sh.y - 110 }, up);
+  elbowR = lerpP(elbowR, { x: sh.x + 70, y: sh.y - 40 }, up);
+  return { hip, sh, head, handL, elbowL, handR, elbowR, foot };
+}
+function drawFigure(p, a, o = {}) {
+  const color = o.color || C.white, smile = o.smile || 0, look = o.look || { x: 0, y: 0 };
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.strokeStyle = color; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(o.glowColor || 'rgba(255,255,255,0.35)', 18);
+  ctx.beginPath();
+  ctx.moveTo(p.hip.x - 60, p.foot); ctx.lineTo(p.hip.x, p.hip.y); ctx.lineTo(p.hip.x + 60, p.foot); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(p.hip.x, p.hip.y); ctx.lineTo(p.sh.x, p.sh.y); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.handL.x, p.handL.y); ctx.lineTo(p.elbowL.x, p.elbowL.y); ctx.lineTo(p.sh.x, p.sh.y);
+  ctx.lineTo(p.elbowR.x, p.elbowR.y); ctx.lineTo(p.handR.x, p.handR.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(p.sh.x, p.sh.y); ctx.lineTo(p.head.x, p.head.y + 48); ctx.stroke();
+  ctx.beginPath(); ctx.arc(p.head.x, p.head.y, 48, 0, Math.PI * 2); ctx.stroke();
+  noGlow();
+  ctx.fillStyle = color;
+  for (const ex of [-16, 16]) {
+    ctx.beginPath(); ctx.ellipse(p.head.x + ex + look.x, p.head.y - 6 + look.y, 6, 7, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  if (smile > 0) {
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(p.head.x - 16 + look.x, p.head.y + 18);
+    ctx.quadraticCurveTo(p.head.x + look.x, p.head.y + 18 + 16 * smile, p.head.x + 16 + look.x, p.head.y + 18);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- robô (I.A.) sem olhos (os olhos são desenhados à parte) ----------
+function drawRobotBody(x, y, s, a, c) {
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.translate(x, y); ctx.scale(s, s);
+  ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(C.cyan, 30); ctx.strokeStyle = C.cyan; ctx.fillStyle = C.cyan;
+  ctx.beginPath(); ctx.moveTo(0, -95); ctx.lineTo(0, -140); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, -152, 13 + Math.sin(c * 6) * 2, 0, Math.PI * 2); ctx.fill();
+  roundRect(-130, -95, 260, 190, 42); ctx.stroke();
+  roundRect(-160, -35, 30, 70, 10); ctx.stroke();
+  roundRect(130, -35, 30, 70, 10); ctx.stroke();
+  ctx.lineWidth = 5;
+  roundRect(-60, 40, 120, 22, 11); ctx.stroke();
+  roundRect(-56, 44, 112 * ((c * 0.9) % 1), 14, 7); ctx.fill();
+  noGlow();
+  ctx.font = `bold 38px ${FONT}`; ctx.textAlign = 'center';
+  ctx.globalAlpha *= 0.85;
+  ctx.fillText('I.A.', 0, 150);
+  ctx.restore();
+}
+function drawEyes(pts, r, a, c) {
+  if (a <= 0) return;
+  const blink = (c % 3.3) > 3.15 ? 0.15 : 1;
+  ctx.save(); ctx.globalAlpha *= a;
+  ctx.fillStyle = C.cyan; glow(C.cyan, 35);
+  for (const p of pts) { ctx.beginPath(); ctx.ellipse(p.x, p.y, r, r * blink, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
+// ---------- layout ----------
+const FIG = { x: 300, foot: 1720 };
+const BOT = { x: 790, y: 1420, s: 0.75 };
+const STAGE = { x: 540, y: 640 };
+
+// ---------- extras de pose ----------
+// wave: acenando; point: apontando para o "palco" (acima, à direita)
+function poseExtras(p, o, c) {
+  const wave = o.wave || 0, point = o.point || 0;
+  if (wave > 0) {
+    const sw = Math.sin(c * 9) * 0.35;
+    const hand = { x: p.sh.x + 70 + Math.sin(sw) * 70, y: p.sh.y - 120 + Math.abs(Math.sin(sw)) * 10 };
+    p.handR = lerpP(p.handR, hand, wave);
+    p.elbowR = lerpP(p.elbowR, { x: p.sh.x + 75, y: p.sh.y - 30 }, wave);
+  }
+  if (point > 0) {
+    p.handR = lerpP(p.handR, { x: p.sh.x + 125, y: p.sh.y - 95 }, point);
+    p.elbowR = lerpP(p.elbowR, { x: p.sh.x + 65, y: p.sh.y - 45 }, point);
+  }
+  return p;
+}
+
+// ---------- robô completo, com olhos felizes ----------
+function drawBot(c, a, happy, bounce) {
+  const y = BOT.y + Math.sin(c * 2.4) * 8 - bounce;
+  drawRobotBody(BOT.x, y, BOT.s, a, c);
+  const s = BOT.s;
+  const pts = [-55, 55].map(ex => ({ x: BOT.x + ex * s, y: y - 15 * s }));
+  if (happy < 0.5) drawEyes(pts, 24 * s, a, c);
+  else {
+    ctx.save(); ctx.globalAlpha *= a;
+    ctx.strokeStyle = C.cyan; ctx.lineWidth = 8; ctx.lineCap = 'round'; glow(C.cyan, 30);
+    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y + 8, 18, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); }
+    ctx.restore();
+  }
+  return { x: BOT.x, y: y - 70 * s };
+}
+
+// curva de Bézier amostrada
+function bez(p0, p1, p2, p3, n = 64) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, v = 1 - u;
+    pts.push({
+      x: v * v * v * p0.x + 3 * v * v * u * p1.x + 3 * v * u * u * p2.x + u * u * u * p3.x,
+      y: v * v * v * p0.y + 3 * v * v * u * p1.y + 3 * v * u * u * p2.y + u * u * u * p3.y
+    });
+  }
+  return pts;
+}
+function strokePartial(pts, k) {
+  if (k <= 0) return;
+  const n = (pts.length - 1) * k, last = Math.floor(n);
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i <= last; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  if (last < pts.length - 1) { const f = n - last; const p = lerpP(pts[last], pts[last + 1], f); ctx.lineTo(p.x, p.y); }
+  ctx.stroke();
+}
+function at(pts, k) {
+  const n = (pts.length - 1) * clamp(k), i = Math.min(Math.floor(n), pts.length - 2);
+  return lerpP(pts[i], pts[i + 1], n - i);
+}
+
+function drawRocket(x, y, s, a, c) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  // chama
+  const fl = 1 + 0.25 * Math.sin(c * 40) + 0.15 * Math.sin(c * 23);
+  glow('#FF9A3C', 40);
+  ctx.fillStyle = '#FF9A3C';
+  ctx.beginPath(); ctx.moveTo(-22, 70); ctx.quadraticCurveTo(0, 70 + 110 * fl, 22, 70); ctx.fill();
+  ctx.fillStyle = C.yellow;
+  ctx.beginPath(); ctx.moveTo(-12, 70); ctx.quadraticCurveTo(0, 70 + 60 * fl, 12, 70); ctx.fill();
+  // corpo
+  glow(C.white, 20);
+  ctx.strokeStyle = C.white; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.fillStyle = '#0A0A0A';
+  ctx.beginPath();
+  ctx.moveTo(0, -100); ctx.bezierCurveTo(45, -60, 42, 20, 32, 70); ctx.lineTo(-32, 70); ctx.bezierCurveTo(-42, 20, -45, -60, 0, -100);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // aletas
+  ctx.beginPath(); ctx.moveTo(-36, 20); ctx.lineTo(-62, 78); ctx.lineTo(-32, 66); ctx.moveTo(36, 20); ctx.lineTo(62, 78); ctx.lineTo(32, 66); ctx.stroke();
+  // janela
+  ctx.strokeStyle = C.cyan; glow(C.cyan, 25);
+  ctx.beginPath(); ctx.arc(0, -25, 17, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- cena ----------
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const c = t;
+  const outro = 1 - ease(seg(t, 16.8, 17.5));
+  ctx.globalAlpha = 1;
+  drawDust(t, ease(seg(t, 0, 0.9)) * outro);
+  ctx.globalAlpha = outro;
+
+  // ===== personagens (sempre presentes) =====
+  const figA = ease(seg(t, 0.1, 0.9));
+  const wave = ease(seg(t, 0.9, 1.3)) * (1 - ease(seg(t, 2.6, 3.0)));
+  const point = ease(seg(t, 4.1, 4.5)) * (1 - ease(seg(t, 5.0, 5.5))) + ease(seg(t, 10.3, 10.7)) * (1 - ease(seg(t, 11.4, 11.8)));
+  const cheer = ease(seg(t, 15.0, 15.35));
+  const hop = cheer * Math.max(0, Math.sin((t - 15) * 8)) * 26;
+  let pose = makePose(FIG.x, FIG.foot - hop, { armsUp: cheer });
+  pose = poseExtras(pose, { wave, point }, c);
+  const look = { x: 6, y: -6 * ease(seg(t, 3.4, 3.9)) };
+  ctx.save(); ctx.globalAlpha *= 1;
+  // chão
+  ctx.save(); ctx.globalAlpha *= 0.45 * figA;
+  const grd = ctx.createLinearGradient(80, 0, 1000, 0);
+  grd.addColorStop(0, 'rgba(255,255,255,0)'); grd.addColorStop(0.5, 'rgba(255,255,255,0.5)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.strokeStyle = grd; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(80, FIG.foot + 5); ctx.lineTo(1000, FIG.foot + 5); ctx.stroke();
+  ctx.restore();
+  drawFigure(pose, figA, { smile: 0.6 + 0.4 * cheer, look });
+  const botA = ease(seg(t, 0.5, 1.2)) * back(seg(t, 0.5, 1.1));
+  const botHappy = (t > 1.0 && t < 2.8) || t > 15.0 || (t > 10.6 && t < 11.4) ? 1 : 0;
+  const bounce = Math.max(0, Math.sin((t - 1.0) * 9)) * 18 * (1 - ease(seg(t, 2.4, 2.8))) * seg(t, 1.0, 1.2)
+    + cheer * Math.max(0, Math.sin((t - 15) * 8 + 1)) * 26;
+  const botTop = drawBot(c, clamp(botA), botHappy, bounce);
+  ctx.restore();
+
+  // ===== 1. "podemos usar I.A." — parceria: elo de luz entre os dois =====
+  const linkA = ease(seg(t, 1.6, 2.2)) * (1 - ease(seg(t, 3.2, 3.8)));
+  if (linkA > 0) {
+    const p0 = { x: pose.head.x + 55, y: pose.head.y }, p1 = { x: BOT.x - 125, y: BOT.y };
+    const pts = bez(p0, { x: p0.x + 120, y: p0.y - 160 }, { x: p1.x - 120, y: p1.y - 160 }, p1);
+    ctx.save(); ctx.globalAlpha *= linkA;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 4; ctx.setLineDash([4, 16]); ctx.lineCap = 'round';
+    strokePartial(pts, ease(seg(t, 1.6, 2.2)));
+    ctx.setLineDash([]);
+    for (let i = 0; i < 4; i++) {
+      const k = ((t - 1.6) * 0.7 + i / 4) % 1;
+      const p = at(pts, k), q = at(pts, 1 - k);
+      drawSparkle(p.x, p.y, 0.6, 1, C.yellow);
+      drawSparkle(q.x, q.y, 0.6, 1, C.cyan);
+    }
+    ctx.restore();
+    // "+" no meio: humano + I.A.
+    const mid = at(pts, 0.5);
+    ctx.save(); ctx.globalAlpha *= linkA; ctx.translate(mid.x, mid.y - 40); ctx.scale(back(seg(t, 1.9, 2.3)), back(seg(t, 1.9, 2.3)));
+    ctx.strokeStyle = C.white; ctx.lineWidth = 10; ctx.lineCap = 'round'; glow('rgba(255,255,255,0.6)', 20);
+    ctx.beginPath(); ctx.moveTo(-26, 0); ctx.lineTo(26, 0); ctx.moveTo(0, -26); ctx.lineTo(0, 26); ctx.stroke();
+    ctx.restore();
+  }
+
+  // ===== 2. "para explorar ideias" — a ideia vira um mapa de ideias =====
+  const mapA = 1 - ease(seg(t, 7.2, 7.8));
+  {
+    const bIn = back(seg(t, 3.5, 3.9));
+    const fly = ease(seg(t, 4.3, 5.0));
+    const start = { x: pose.head.x, y: pose.head.y - 130 };
+    const pos = lerpP(start, STAGE, fly);
+    pos.y -= Math.sin(fly * Math.PI) * 120;
+    const bs = lerp(1, 1.7, fly) * bIn;
+    // feixe da I.A. alimentando a ideia
+    const beam = ease(seg(t, 4.9, 5.3)) * mapA;
+    if (beam > 0) {
+      ctx.save(); ctx.globalAlpha *= beam;
+      ctx.strokeStyle = C.cyan; ctx.lineWidth = 5; glow(C.cyan, 25); ctx.setLineDash([18, 14]); ctx.lineDashOffset = -t * 120;
+      ctx.beginPath(); ctx.moveTo(botTop.x, botTop.y - 40); ctx.quadraticCurveTo(900, 1000, STAGE.x + 60, STAGE.y + 90); ctx.stroke();
+      ctx.restore();
+    }
+    // nós do mapa
+    const N = 6;
+    for (let i = 0; i < N; i++) {
+      const ang = -Math.PI / 2 + i * Math.PI * 2 / N + 0.3;
+      const R = 330;
+      const nk = seg(t, 5.1 + i * 0.16, 5.6 + i * 0.16);
+      if (nk <= 0) continue;
+      const np = { x: STAGE.x + Math.cos(ang) * R, y: STAGE.y + Math.sin(ang) * R * 1.05 + Math.sin(c * 2 + i) * 6 };
+      ctx.save(); ctx.globalAlpha *= mapA;
+      ctx.strokeStyle = 'rgba(79,209,255,0.7)'; ctx.lineWidth = 4; glow(C.cyan, 12);
+      const lp = lerpP(STAGE, np, easeOut(nk));
+      ctx.beginPath(); ctx.moveTo(STAGE.x, STAGE.y); ctx.lineTo(lp.x, lp.y); ctx.stroke();
+      // ramos menores
+      for (let j = 0; j < 2; j++) {
+        const sk = easeOut(seg(t, 6.0 + i * 0.1 + j * 0.15, 6.5 + i * 0.1 + j * 0.15));
+        if (sk <= 0) continue;
+        const a2 = ang + (j ? 0.5 : -0.5);
+        const sp = { x: np.x + Math.cos(a2) * 120 * sk, y: np.y + Math.sin(a2) * 120 * sk };
+        ctx.strokeStyle = 'rgba(79,209,255,0.45)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(np.x, np.y); ctx.lineTo(sp.x, sp.y); ctx.stroke();
+        ctx.fillStyle = j ? C.cyan : C.yellow; glow(ctx.fillStyle, 15);
+        ctx.beginPath(); ctx.arc(sp.x, sp.y, 9 * sk, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      ctx.save(); ctx.globalAlpha *= mapA * clamp(nk * 2);
+      const s = back(seg(nk, 0.3, 1)) * 0.75;
+      if (i % 3 === 0) drawBulb(np.x, np.y + 10, s, 1, 1);
+      else drawOrbitIcon(i % 3 === 1 ? 0 : (i === 2 ? 1 : 2), np.x, np.y, s * 1.1, 1);
+      ctx.restore();
+    }
+    // ideia central
+    const centralA = clamp(seg(t, 3.5, 3.7)) * mapA;
+    drawBulb(pos.x, pos.y + Math.sin(c * 3) * 5, bs, centralA, easeOut(seg(t, 3.8, 4.1)));
+  }
+
+  // ===== 3. "encontrar alternativas" — caminhos A, B, C =====
+  const pathA = ease(seg(t, 7.6, 8.0)) * (1 - ease(seg(t, 11.3, 11.8)));
+  if (pathA > 0) {
+    const S = { x: 540, y: 1100 };
+    const ends = [{ x: 210, y: 420 }, { x: 540, y: 300 }, { x: 870, y: 420 }];
+    const paths = ends.map(e => bez(S, { x: 540, y: 880 }, { x: e.x, y: e.y + 260 }, e));
+    const chosen = 1;
+    const pick = ease(seg(t, 10.4, 10.8));
+    ctx.save(); ctx.globalAlpha *= pathA;
+    // ponto de partida
+    ctx.fillStyle = C.white; glow('rgba(255,255,255,0.6)', 20);
+    ctx.beginPath(); ctx.arc(S.x, S.y, 16 * back(seg(t, 7.6, 7.9)), 0, Math.PI * 2); ctx.fill();
+    paths.forEach((pts, i) => {
+      const dk = easeOut(seg(t, 7.8 + i * 0.2, 8.6 + i * 0.2));
+      const win = i === chosen ? pick : 0;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = win > 0 ? C.green : 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 6 + win * 6; glow(win > 0 ? C.green : 'rgba(255,255,255,0.4)', 15 + win * 20);
+      ctx.globalAlpha = outro * pathA * (1 - pick * 0.55 * (i === chosen ? 0 : 1));
+      ctx.setLineDash([2, 20]);
+      strokePartial(pts, dk);
+      ctx.setLineDash([]);
+      if (win > 0) { ctx.globalAlpha = outro * pathA * win; strokePartial(pts, 1); }
+      // sonda da I.A. percorrendo cada caminho
+      const sk = seg(t, 8.9 + i * 0.45, 9.5 + i * 0.45);
+      if (sk > 0 && sk < 1) {
+        const p = at(pts, ease(sk));
+        ctx.globalAlpha = outro * pathA;
+        ctx.fillStyle = C.cyan; glow(C.cyan, 30);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, Math.PI * 2); ctx.fill();
+      }
+      // nó com letra
+      const nk = back(seg(t, 8.5 + i * 0.2, 8.9 + i * 0.2));
+      if (nk > 0) {
+        const e = ends[i];
+        const scanned = seg(t, 9.45 + i * 0.45, 9.6 + i * 0.45);
+        const col = win > 0 ? C.green : (scanned > 0 ? C.cyan : C.white);
+        ctx.globalAlpha = outro * pathA * (1 - pick * 0.55 * (i === chosen ? 0 : 1));
+        ctx.save(); ctx.translate(e.x, e.y); ctx.scale(nk * (1 + win * 0.2), nk * (1 + win * 0.2));
+        ctx.fillStyle = '#0A0A0A'; ctx.strokeStyle = col; ctx.lineWidth = 7; glow(col, 25);
+        ctx.beginPath(); ctx.arc(0, 0, 62, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = col; ctx.font = `bold 64px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('ABC'[i], 0, 3);
+        ctx.restore();
+      }
+    });
+    ctx.restore();
+    // escolha: estrela e brilhos sobre B
+    if (pick > 0) {
+      const e = ends[chosen];
+      drawStar(e.x, e.y - 115, back(pick) * 1.3, pathA * pick, C.yellow);
+      for (let i = 0; i < 8; i++) {
+        const ang = i / 8 * Math.PI * 2;
+        const k = seg(t, 10.4, 11.2);
+        drawSparkle(e.x + Math.cos(ang) * (80 + 90 * easeOut(k)), e.y + Math.sin(ang) * (80 + 90 * easeOut(k)), 0.7, pathA * (1 - k), i % 2 ? C.green : '#FFFFFF');
+      }
+    }
+  }
+
+  // ===== 4. "e acelerar o trabalho" — tarefas concluídas, progresso, foguete =====
+  const workA = ease(seg(t, 11.7, 12.2)) * (1 - ease(seg(t, 16.0, 16.6)) * 0.0);
+  if (workA > 0) {
+    const cx = 540, cy = 560, w = 620, h = 500;
+    const cardIn = easeOut(seg(t, 11.7, 12.2));
+    ctx.save(); ctx.globalAlpha *= workA; ctx.translate(0, (1 - cardIn) * 60);
+    // velocidade: linhas passando
+    const speed = ease(seg(t, 12.8, 13.6));
+    for (let i = 0; i < 14; i++) {
+      const y = 200 + rand(i + 300) * 900;
+      const len = 80 + rand(i + 310) * 160;
+      const x = W + 200 - (((t * (900 + rand(i) * 900)) + rand(i + 320) * 2000) % (W + 600));
+      ctx.save(); ctx.globalAlpha *= speed * 0.35;
+      ctx.strokeStyle = C.white; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+      ctx.restore();
+    }
+    // cartão
+    ctx.fillStyle = '#070707'; ctx.strokeStyle = C.white; ctx.lineWidth = 6; glow('rgba(255,255,255,0.35)', 20);
+    roundRect(cx - w / 2, cy - h / 2, w, h, 36); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = C.cyan; glow(C.cyan, 15); ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - w / 2 + 50, cy - h / 2 + 60); ctx.lineTo(cx - w / 2 + 230, cy - h / 2 + 60); ctx.stroke();
+    const checkT = [12.5, 13.0, 13.35, 13.6];
+    checkT.forEach((ct, i) => {
+      const ry = cy - h / 2 + 150 + i * 92;
+      const bx = cx - w / 2 + 55;
+      const ck = seg(t, ct, ct + 0.22);
+      ctx.save();
+      ctx.strokeStyle = ck > 0 ? C.green : 'rgba(255,255,255,0.7)'; ctx.lineWidth = 6; glow(ck > 0 ? C.green : 'transparent', 15);
+      roundRect(bx, ry - 26, 52, 52, 12); ctx.stroke();
+      if (ck > 0) {
+        ctx.lineWidth = 9; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        const pts = [{ x: bx + 10, y: ry + 2 }, { x: bx + 22, y: ry + 14 }, { x: bx + 44, y: ry - 14 }];
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+        if (ck < 0.4) { const p = lerpP(pts[0], pts[1], ck / 0.4); ctx.lineTo(p.x, p.y); }
+        else { ctx.lineTo(pts[1].x, pts[1].y); const p = lerpP(pts[1], pts[2], (ck - 0.4) / 0.6); ctx.lineTo(p.x, p.y); }
+        ctx.stroke();
+      }
+      noGlow();
+      const L = [380, 300, 340, 260][i];
+      ctx.strokeStyle = ck >= 1 ? 'rgba(74,222,128,0.55)' : 'rgba(255,255,255,0.4)'; ctx.lineWidth = 12; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bx + 90, ry); ctx.lineTo(bx + 90 + L, ry); ctx.stroke();
+      ctx.restore();
+    });
+    // barra de progresso
+    const prog = Math.pow(seg(t, 12.3, 14.6), 1.8);
+    const by = cy + h / 2 + 90, bw = w, bh = 46;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 5; noGlow();
+    roundRect(cx - bw / 2, by, bw, bh, bh / 2); ctx.stroke();
+    if (prog > 0) {
+      const g = ctx.createLinearGradient(cx - bw / 2, 0, cx + bw / 2, 0);
+      g.addColorStop(0, C.cyan); g.addColorStop(1, C.green);
+      ctx.fillStyle = g; glow(C.green, 25);
+      roundRect(cx - bw / 2 + 8, by + 8, Math.max(bh - 16, (bw - 16) * prog), bh - 16, (bh - 16) / 2); ctx.fill();
+    }
+    ctx.font = `bold 54px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = prog >= 1 ? C.green : C.white; glow(prog >= 1 ? C.green : 'transparent', 20);
+    ctx.fillText(Math.round(prog * 100) + '%', cx, by + bh + 65);
+    ctx.restore();
+
+    // foguete decolando
+    const rk = seg(t, 13.9, 15.4);
+    if (rk > 0 && rk < 1) {
+      const ry = lerp(1500, -250, Math.pow(rk, 1.6));
+      const rx = 975 + Math.sin(rk * 6) * 6;
+      for (let i = 0; i < 10; i++) {
+        const k2 = ((t * 3 + i / 10) % 1);
+        ctx.save(); ctx.globalAlpha *= (1 - k2) * 0.6;
+        ctx.fillStyle = i % 2 ? C.yellow : '#FF9A3C'; glow('#FF9A3C', 15);
+        ctx.beginPath(); ctx.arc(rx + (rand(i + 500) - 0.5) * 30, ry + 150 + k2 * 220, 7 * (1 - k2) + 2, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      drawRocket(rx, ry, 0.9, 1, c);
+    }
+  }
+
+  // ===== comemoração: confete =====
+  const cf = seg(t, 15.0, 17.5);
+  if (cf > 0) {
+    const cols = [C.yellow, C.cyan, C.green, C.pink, '#FFFFFF'];
+    const origin = { x: 545, y: 1300 };
+    for (let i = 0; i < 46; i++) {
+      const ang = -Math.PI / 2 + (rand(i + 700) - 0.5) * 2.2;
+      const v = 900 + rand(i + 710) * 900;
+      const tt = (t - 15.0) * 1.2;
+      const x = origin.x + Math.cos(ang) * v * tt * 0.6;
+      const y = origin.y + Math.sin(ang) * v * tt + 900 * tt * tt;
+      ctx.save(); ctx.globalAlpha *= (1 - seg(cf, 0.5, 1));
+      ctx.translate(x, y); ctx.rotate(tt * (6 + rand(i) * 10));
+      ctx.fillStyle = cols[i % cols.length];
+      ctx.fillRect(-9, -5, 18, 10);
+      ctx.restore();
+    }
+  }
+}
+
+function drawDust(t, a) {
+  for (let i = 0; i < 60; i++) {
+    const x = (rand(i) * W + t * (8 + rand(i + 9) * 14)) % W;
+    const y = (rand(i + 99) * H - t * (6 + rand(i + 3) * 10) + H * 10) % H;
+    ctx.globalAlpha = a * (0.08 + 0.12 * rand(i + 5));
+    ctx.fillStyle = C.white;
+    ctx.beginPath(); ctx.arc(x, y, 1.5 + rand(i + 7) * 2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+window.render = render;
+window.DURATION = DURATION;
+if (!location.search.includes('capture')) {
+  const t0 = performance.now();
+  (function loop() { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); })();
+} else {
+  render(0);
+}
+</script>
+</body>
+</html>
