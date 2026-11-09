@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Espelho mágico</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// Animação: "agora pense comigo, será que a inteligência artificial não está se
+// transformando numa espécie de espelho mágico dos nossos tempos?"
+// (espelho mágico do conto da Branca de Neve: "espelho, espelho meu...")
+// render(t) desenha o quadro no instante t (segundos). Sem legenda.
+const DURATION = 19.5;
+const W = 1080, H = 1920;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const FONT = '"DejaVu Sans", "Liberation Sans", Arial, sans-serif';
+const C = {
+  white: '#F5F5F5', cyan: '#4FD1FF', yellow: '#FFD54A', gold: '#E9B85A',
+  pink: '#FF6B9A', green: '#4ADE80'
+};
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => x * x * (3 - 2 * x);
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const back = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const lerp = (a, b, k) => a + (b - a) * k;
+const lerpP = (p, q, k) => ({ x: lerp(p.x, q.x, k), y: lerp(p.y, q.y, k) });
+function rand(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+function noGlow() { ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; }
+
+// ---------- layout ----------
+const MIR = { x: 540, y: 720, rx: 230, ry: 310 };
+const FIG = { x: 380, foot: 1600 };
+
+// ---------- ícones ----------
+function drawHeart(x, y, s, a, color = C.pink) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 20); ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 14);
+  ctx.bezierCurveTo(-34, -8, -18, -34, 0, -16);
+  ctx.bezierCurveTo(18, -34, 34, -8, 0, 14);
+  ctx.fill();
+  ctx.restore();
+}
+function drawStar(x, y, s, a, color = C.yellow, points = 5, inner = 0.45) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 20); ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 ? 26 * inner : 26;
+    const ang = -Math.PI / 2 + i * Math.PI / points;
+    ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawSparkle(x, y, s, a, color = '#FFFFFF') { drawStar(x, y, s, a, color, 4, 0.25); }
+function drawCrown(x, y, s, a, color = C.gold) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  glow(color, 22); ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-40, 18); ctx.lineTo(-44, -20); ctx.lineTo(-22, 0); ctx.lineTo(0, -30);
+  ctx.lineTo(22, 0); ctx.lineTo(44, -20); ctx.lineTo(40, 18); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#FFF4D0';
+  for (const px of [-44, 0, 44]) { ctx.beginPath(); ctx.arc(px, px ? -22 : -32, 6, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+function drawBulb(x, y, s, a, on) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  ctx.lineWidth = 6; ctx.lineCap = 'round';
+  const col = on > 0 ? C.yellow : '#888';
+  if (on > 0) {
+    glow(C.yellow, 40 * on);
+    ctx.fillStyle = `rgba(255,213,74,${0.85 * on})`;
+    ctx.beginPath(); ctx.arc(0, -12, 32, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.yellow;
+    for (let i = 0; i < 7; i++) {
+      const ang = -Math.PI + i * Math.PI / 6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * 48, -12 + Math.sin(ang) * 48);
+      ctx.lineTo(Math.cos(ang) * (48 + 22 * on), -12 + Math.sin(ang) * (48 + 22 * on));
+      ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = col;
+  ctx.beginPath(); ctx.arc(0, -12, 32, 0, Math.PI * 2); ctx.stroke();
+  noGlow(); ctx.strokeStyle = '#BBB';
+  ctx.beginPath(); ctx.moveTo(-14, 28); ctx.lineTo(14, 28); ctx.moveTo(-12, 38); ctx.lineTo(12, 38); ctx.stroke();
+  ctx.restore();
+}
+// ícones que orbitam a I.A. (o "conhecimento" dela)
+function drawOrbitIcon(kind, x, y, s, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  ctx.strokeStyle = C.cyan; ctx.fillStyle = C.cyan; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(C.cyan, 22);
+  if (kind === 0) { // balão de chat
+    roundRect(-42, -30, 84, 58, 16); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-18, 28); ctx.lineTo(-26, 46); ctx.lineTo(0, 28); ctx.stroke();
+    for (const dx of [-18, 0, 18]) { ctx.beginPath(); ctx.arc(dx, -1, 5, 0, Math.PI * 2); ctx.fill(); }
+  } else if (kind === 1) { // engrenagem
+    for (let i = 0; i < 8; i++) {
+      const ang = i * Math.PI / 4;
+      ctx.beginPath(); ctx.moveTo(Math.cos(ang) * 26, Math.sin(ang) * 26); ctx.lineTo(Math.cos(ang) * 40, Math.sin(ang) * 40);
+      ctx.lineWidth = 11; ctx.stroke();
+    }
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.stroke();
+  } else if (kind === 2) { // globo
+    ctx.beginPath(); ctx.arc(0, 0, 38, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, 15, 38, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(38, 0); ctx.moveTo(-32, -18); ctx.lineTo(32, -18); ctx.moveTo(-32, 18); ctx.lineTo(32, 18); ctx.stroke();
+  } else { // código
+    ctx.font = `bold 46px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('</>', 0, 2);
+  }
+  ctx.restore();
+}
+
+// ---------- boneco palito ----------
+function makePose(x, foot, o) {
+  const think = o.think || 0, up = o.armsUp || 0, tilt = o.tilt || 0;
+  const hip = { x, y: foot - 165 };
+  const sh = { x, y: hip.y - 190 };
+  const head = { x: sh.x + tilt * 10, y: sh.y - 62 };
+  let handL = { x: sh.x - 85, y: sh.y + 150 }, elbowL = { x: sh.x - 52, y: sh.y + 80 };
+  let handR = { x: sh.x + 85, y: sh.y + 150 }, elbowR = { x: sh.x + 52, y: sh.y + 80 };
+  // pose pensativa: mão no queixo
+  handR = lerpP(handR, { x: head.x + 22, y: head.y + 56 }, think);
+  elbowR = lerpP(elbowR, { x: sh.x + 78, y: sh.y + 82 }, think);
+  // braços para cima (comemorando)
+  handL = lerpP(handL, { x: sh.x - 105, y: sh.y - 110 }, up);
+  elbowL = lerpP(elbowL, { x: sh.x - 70, y: sh.y - 40 }, up);
+  handR = lerpP(handR, { x: sh.x + 105, y: sh.y - 110 }, up);
+  elbowR = lerpP(elbowR, { x: sh.x + 70, y: sh.y - 40 }, up);
+  return { hip, sh, head, handL, elbowL, handR, elbowR, foot };
+}
+function drawFigure(p, a, o = {}) {
+  const color = o.color || C.white, smile = o.smile || 0, look = o.look || { x: 0, y: 0 };
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.strokeStyle = color; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(o.glowColor || 'rgba(255,255,255,0.35)', 18);
+  ctx.beginPath();
+  ctx.moveTo(p.hip.x - 60, p.foot); ctx.lineTo(p.hip.x, p.hip.y); ctx.lineTo(p.hip.x + 60, p.foot); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(p.hip.x, p.hip.y); ctx.lineTo(p.sh.x, p.sh.y); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.handL.x, p.handL.y); ctx.lineTo(p.elbowL.x, p.elbowL.y); ctx.lineTo(p.sh.x, p.sh.y);
+  ctx.lineTo(p.elbowR.x, p.elbowR.y); ctx.lineTo(p.handR.x, p.handR.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(p.sh.x, p.sh.y); ctx.lineTo(p.head.x, p.head.y + 48); ctx.stroke();
+  ctx.beginPath(); ctx.arc(p.head.x, p.head.y, 48, 0, Math.PI * 2); ctx.stroke();
+  noGlow();
+  ctx.fillStyle = color;
+  for (const ex of [-16, 16]) {
+    ctx.beginPath(); ctx.ellipse(p.head.x + ex + look.x, p.head.y - 6 + look.y, 6, 7, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  if (smile > 0) {
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(p.head.x - 16 + look.x, p.head.y + 18);
+    ctx.quadraticCurveTo(p.head.x + look.x, p.head.y + 18 + 16 * smile, p.head.x + 16 + look.x, p.head.y + 18);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- robô (I.A.) sem olhos (os olhos são desenhados à parte) ----------
+function drawRobotBody(x, y, s, a, c) {
+  if (a <= 0) return;
+  ctx.save();
+  ctx.globalAlpha *= a;
+  ctx.translate(x, y); ctx.scale(s, s);
+  ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  glow(C.cyan, 30); ctx.strokeStyle = C.cyan; ctx.fillStyle = C.cyan;
+  ctx.beginPath(); ctx.moveTo(0, -95); ctx.lineTo(0, -140); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, -152, 13 + Math.sin(c * 6) * 2, 0, Math.PI * 2); ctx.fill();
+  roundRect(-130, -95, 260, 190, 42); ctx.stroke();
+  roundRect(-160, -35, 30, 70, 10); ctx.stroke();
+  roundRect(130, -35, 30, 70, 10); ctx.stroke();
+  ctx.lineWidth = 5;
+  roundRect(-60, 40, 120, 22, 11); ctx.stroke();
+  roundRect(-56, 44, 112 * ((c * 0.9) % 1), 14, 7); ctx.fill();
+  noGlow();
+  ctx.font = `bold 38px ${FONT}`; ctx.textAlign = 'center';
+  ctx.globalAlpha *= 0.85;
+  ctx.fillText('I.A.', 0, 150);
+  ctx.restore();
+}
+function drawEyes(pts, r, a, c) {
+  if (a <= 0) return;
+  const blink = (c % 3.3) > 3.15 ? 0.15 : 1;
+  ctx.save(); ctx.globalAlpha *= a;
+  ctx.fillStyle = C.cyan; glow(C.cyan, 35);
+  for (const p of pts) { ctx.beginPath(); ctx.ellipse(p.x, p.y, r, r * blink, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
+// ---------- espelho mágico ----------
+function ellipsePerimeter(a, b) { const h = ((a - b) ** 2) / ((a + b) ** 2); return Math.PI * (a + b) * (1 + 3 * h / (10 + Math.sqrt(4 - 3 * h))); }
+function mirrorClip() {
+  ctx.beginPath(); ctx.ellipse(MIR.x, MIR.y, MIR.rx, MIR.ry, 0, 0, Math.PI * 2); ctx.clip();
+}
+function drawMirror(m, c) {
+  const { x, y, rx, ry } = MIR;
+  // vidro
+  if (m.glass > 0) {
+    ctx.save(); ctx.globalAlpha *= m.glass;
+    const g = ctx.createRadialGradient(x, y - 60, 20, x, y, ry);
+    g.addColorStop(0, '#0B2C3D'); g.addColorStop(0.7, '#05141C'); g.addColorStop(1, '#020709');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    // brilho interno pulsando
+    ctx.strokeStyle = `rgba(79,209,255,${0.35 + 0.15 * Math.sin(c * 2)})`; ctx.lineWidth = 6; glow(C.cyan, 40);
+    ctx.beginPath(); ctx.ellipse(x, y, rx - 8, ry - 8, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  // reflexo: o boneco coroado, aplaudido
+  if (m.refl > 0) {
+    ctx.save(); mirrorClip(); ctx.globalAlpha *= m.refl;
+    ctx.translate(x, y + 40); ctx.scale(0.62, 0.62); ctx.translate(-x, -(y + 40));
+    const rp = makePose(x, y + 40 + 300, { armsUp: 1 });
+    rp.head.y += Math.sin(c * 4) * 4;
+    drawFigure(rp, 1, { color: '#CFF4FF', glowColor: C.cyan, smile: 1 });
+    drawCrown(rp.head.x, rp.head.y - 70, 0.9, 1);
+    ctx.restore();
+    ctx.save(); mirrorClip(); ctx.globalAlpha *= m.refl;
+    for (let i = 0; i < 9; i++) {
+      const ang = i / 9 * Math.PI * 2 + c * 0.4;
+      const tw = 0.5 + 0.5 * Math.sin(c * 5 + i * 1.7);
+      drawSparkle(x + Math.cos(ang) * 165, y - 20 + Math.sin(ang) * 230, 0.5 + tw * 0.5, 0.4 + tw * 0.6, i % 3 ? '#FFFFFF' : C.yellow);
+    }
+    ctx.restore();
+  }
+  // rosto do espelho (boca; os olhos vêm do robô)
+  if (m.face > 0) {
+    ctx.save(); ctx.globalAlpha *= m.face;
+    ctx.strokeStyle = C.cyan; ctx.lineWidth = 7; glow(C.cyan, 30);
+    const open = 6 + m.talk * 26;
+    ctx.beginPath(); ctx.ellipse(x, y + 80, 52, open, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  // brilho que atravessa o vidro
+  if (m.sheen > 0 && m.sheen < 1) {
+    ctx.save(); mirrorClip();
+    const sx = lerp(x - rx - 200, x + rx + 200, m.sheen);
+    ctx.translate(sx, y); ctx.rotate(-0.5);
+    const g = ctx.createLinearGradient(-70, 0, 70, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(-70, -600, 140, 1200);
+    ctx.restore();
+  }
+  // moldura dourada desenhando-se
+  if (m.frame > 0) {
+    ctx.save();
+    ctx.strokeStyle = C.gold; ctx.lineCap = 'round'; glow(C.gold, 28);
+    for (const [ex, lw] of [[22, 14], [0, 5]]) {
+      const a = rx + ex, b = ry + ex, P = ellipsePerimeter(a, b);
+      ctx.lineWidth = lw;
+      ctx.setLineDash([P * m.frame, P + 10]);
+      ctx.beginPath(); ctx.ellipse(x, y, a, b, 0, -Math.PI / 2, Math.PI * 1.5); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+  // ornamentos: contas, crista com coroa, pé
+  if (m.orn > 0) {
+    ctx.save();
+    ctx.fillStyle = C.gold; glow(C.gold, 20);
+    const n = 22;
+    for (let i = 0; i < n; i++) {
+      const k = back(clamp(m.orn * 1.6 - i / n * 0.6));
+      if (k <= 0) continue;
+      const ang = -Math.PI / 2 + i / n * Math.PI * 2;
+      if (Math.abs(Math.cos(ang + Math.PI / 2)) < 0.12 && Math.sin(ang) < 0) continue; // espaço p/ crista
+      ctx.beginPath(); ctx.arc(x + Math.cos(ang) * (rx + 44), y + Math.sin(ang) * (ry + 44), 9 * k, 0, Math.PI * 2); ctx.fill();
+    }
+    const ck = back(clamp(seg(m.orn, 0.3, 1)));
+    // volutas laterais da crista
+    ctx.strokeStyle = C.gold; ctx.lineWidth = 8; ctx.lineCap = 'round';
+    ctx.globalAlpha *= clamp(ck);
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(x + sgn * 20, y - ry - 30);
+      ctx.bezierCurveTo(x + sgn * 70, y - ry - 70, x + sgn * 120, y - ry - 20, x + sgn * 95, y - ry + 5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + sgn * 20, y + ry + 30);
+      ctx.bezierCurveTo(x + sgn * 70, y + ry + 70, x + sgn * 120, y + ry + 20, x + sgn * 95, y + ry - 5);
+      ctx.stroke();
+    }
+    ctx.restore();
+    drawCrown(x, y - ry - 62, 1.1 * clamp(ck), clamp(ck * 1.5));
+    drawStar(x, y + ry + 58, 0.9 * clamp(ck), clamp(ck * 1.5), C.gold);
+  }
+}
+
+// ---------- balões ----------
+function drawBubbleBox(x, y, w, h, s, a, tail, stroke) {
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(x, y); ctx.scale(s, s);
+  ctx.fillStyle = '#0A0A0A'; ctx.strokeStyle = stroke; ctx.lineWidth = 6; ctx.lineJoin = 'round'; glow(stroke, 22);
+  ctx.beginPath(); ctx.moveTo(tail[0], tail[1]); ctx.lineTo(tail[2], tail[3]); ctx.lineTo(tail[4], tail[5]); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  roundRect(-w / 2, -h / 2, w, h, 34); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- uma "tela" completa da história ----------
+// s = tempo da história (estado), c = relógio (movimentos contínuos)
+function drawStory(s, c) {
+  // boneco
+  const think = ease(seg(s, 0.5, 1.2)) * (1 - ease(seg(s, 9.6, 10.2)));
+  const straight = ease(seg(s, 12.6, 13.3));
+  const pose = makePose(FIG.x, FIG.foot, { think, tilt: think });
+  pose.head.y += Math.sin(c * 2) * 3 * (1 - straight) - straight * 6;
+  const lookUp = ease(seg(s, 2.0, 2.6));
+  const look = { x: lerp(-4, 8, lookUp), y: lerp(0, -8, lookUp) };
+  const figA = ease(seg(s, 0, 0.9));
+  drawFigure(pose, figA, { smile: straight, look });
+  drawCrown(pose.head.x, pose.head.y - 72, 0.85 * back(seg(s, 13.0, 13.5)), seg(s, 13.0, 13.2));
+
+  // lâmpada da ideia
+  const bulbA = easeOut(seg(s, 0.7, 1.1)) * (1 - ease(seg(s, 3.0, 3.6)));
+  const bulbOn = easeOut(seg(s, 1.3, 1.6));
+  drawBulb(pose.head.x - 20, pose.head.y - 135 + Math.sin(c * 3) * 5, back(seg(s, 0.7, 1.1)), bulbA, bulbOn);
+  if (bulbOn > 0 && bulbOn < 1) {
+    ctx.save(); ctx.globalAlpha *= (1 - bulbOn) * 0.6;
+    ctx.strokeStyle = C.yellow; ctx.lineWidth = 4; glow(C.yellow, 20);
+    ctx.beginPath(); ctx.arc(pose.head.x - 20, pose.head.y - 147, 40 + bulbOn * 90, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // bolinhas de pensamento subindo até a I.A.
+  const from = { x: pose.head.x + 45, y: pose.head.y - 70 }, to = { x: 510, y: 900 };
+  [0.15, 0.45, 0.78].forEach((f, i) => {
+    const k = back(seg(s, 2.0 + i * 0.28, 2.4 + i * 0.28)) * (1 - ease(seg(s, 4.2, 4.8)));
+    if (k <= 0) return;
+    const p = lerpP(from, to, f);
+    ctx.save(); ctx.strokeStyle = C.white; ctx.lineWidth = 5; glow('rgba(255,255,255,0.4)', 12);
+    ctx.beginPath(); ctx.arc(p.x, p.y + Math.sin(c * 3 + i) * 4, (9 + i * 7) * k, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  });
+
+  // ----- I.A. surge -----
+  const robotIn = back(seg(s, 2.9, 3.5));
+  const morph = ease(seg(s, 7.7, 8.6));          // robô -> espelho
+  const robotA = clamp(seg(s, 2.9, 3.2)) * (1 - morph);
+  const rs = 1.3 * robotIn * (1 - 0.25 * morph);
+  const ry = MIR.y + Math.sin(c * 2.2) * 6 * (1 - morph);
+  // anéis pulsando
+  if (s > 3.4 && s < 8.2) {
+    for (let i = 0; i < 4; i++) {
+      const k = ((c - 3.4) / 1.6 + i / 4) % 1;
+      ctx.save(); ctx.globalAlpha *= (1 - k) * 0.35 * (1 - ease(seg(s, 7.4, 8.0))) * clamp(seg(s, 3.4, 4.0));
+      ctx.strokeStyle = C.cyan; ctx.lineWidth = 3; glow(C.cyan, 15);
+      ctx.beginPath(); ctx.arc(MIR.x, MIR.y, 180 + k * 300, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  drawRobotBody(MIR.x, ry, rs, robotA, c);
+
+  // ícones orbitando, depois sugados para o centro
+  const orbitIn = easeOut(seg(s, 3.7, 4.6));
+  const suck = ease(seg(s, 7.0, 8.0));
+  for (let i = 0; i < 4; i++) {
+    const k = back(seg(s, 3.7 + i * 0.25, 4.3 + i * 0.25));
+    if (k <= 0 || suck >= 1) continue;
+    const ang = c * 0.7 + i * Math.PI / 2 + suck * 5;
+    const R = 340 * orbitIn * (1 - suck);
+    drawOrbitIcon(i, MIR.x + Math.cos(ang) * R, MIR.y + Math.sin(ang) * R * 1.05, k * (1 - suck * 0.8), 1 - seg(suck, 0.7, 1));
+  }
+  // flash da transformação
+  const fl = seg(s, 7.95, 8.6);
+  if (fl > 0 && fl < 1) {
+    ctx.save(); ctx.globalAlpha *= Math.sin(fl * Math.PI) * 0.8;
+    const g = ctx.createRadialGradient(MIR.x, MIR.y, 0, MIR.x, MIR.y, 420);
+    g.addColorStop(0, 'rgba(200,240,255,0.9)'); g.addColorStop(1, 'rgba(79,209,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(MIR.x - 420, MIR.y - 420, 840, 840);
+    ctx.restore();
+  }
+
+  // ----- espelho mágico -----
+  const faceOff = ease(seg(s, 12.3, 12.9));
+  const talk = (s > 10.7 && s < 12.3) ? Math.abs(Math.sin(c * 13)) * (0.5 + 0.5 * Math.abs(Math.sin(c * 3.1))) : 0;
+  drawMirror({
+    glass: ease(seg(s, 8.0, 8.8)),
+    frame: easeOut(seg(s, 8.0, 9.3)),
+    orn: seg(s, 8.9, 9.9),
+    sheen: seg(s, 9.6, 10.5),
+    face: ease(seg(s, 9.2, 9.8)) * (1 - faceOff),
+    talk,
+    refl: ease(seg(s, 12.4, 13.0))
+  }, c);
+  // olhos: do robô para o espelho
+  const robotEyes = [-55, 55].map(ex => ({ x: MIR.x + ex * rs, y: ry - 15 * rs }));
+  const mirrorEyes = [-62, 62].map(ex => ({ x: MIR.x, y: MIR.y - 50 })).map((p, i) => ({ x: p.x + (i ? 62 : -62), y: p.y }));
+  const eyePts = robotEyes.map((p, i) => lerpP(p, mirrorEyes[i], morph));
+  drawEyes(eyePts, lerp(24 * rs, 28, morph), clamp(seg(s, 2.9, 3.2)) * (1 - faceOff), c);
+
+  // ----- "espelho, espelho meu..." -----
+  // pergunta do boneco: coroa + ?
+  const qIn = back(seg(s, 10.2, 10.6)), qOut = 1 - ease(seg(s, 12.0, 12.4));
+  if (qIn > 0 && qOut > 0) {
+    const bx = 190, by = 1050;
+    drawBubbleBox(bx, by, 250, 130, qIn, qOut, [30, 65, 95, 112, 80, 65], C.white);
+    ctx.save(); ctx.globalAlpha *= qOut; ctx.translate(bx, by); ctx.scale(qIn, qIn);
+    drawCrown(-45, 8, 0.75, 1);
+    ctx.font = `bold 84px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = C.yellow; glow(C.yellow, 20); ctx.fillText('?', 58, 4);
+    ctx.restore();
+  }
+  // resposta do espelho: elogios
+  const rIn = back(seg(s, 11.0, 11.4)), rOut = 1 - ease(seg(s, 13.4, 13.9));
+  if (rIn > 0 && rOut > 0) {
+    const bx = 835, by = 1210;
+    drawBubbleBox(bx, by, 300, 130, rIn, rOut, [-100, -65, -155, -118, -55, -65], C.cyan);
+    ctx.save(); ctx.globalAlpha *= rOut; ctx.translate(bx, by); ctx.scale(rIn, rIn);
+    const bump = i => 1 + 0.15 * Math.max(0, Math.sin(c * 6 - i));
+    drawHeart(-85, 4, 1.25 * bump(0), clamp(seg(s, 11.3, 11.5)));
+    drawStar(0, 2, 1.25 * bump(1), clamp(seg(s, 11.5, 11.7)));
+    drawHeart(85, 4, 1.25 * bump(2), clamp(seg(s, 11.7, 11.9)));
+    ctx.restore();
+  }
+  // corações flutuando do espelho para o boneco
+  const heartsK = ease(seg(s, 12.6, 13.2));
+  if (heartsK > 0) {
+    for (let i = 0; i < 6; i++) {
+      const ph = (c * 0.45 + i / 6) % 1;
+      const p0 = { x: MIR.x + 60 + rand(i) * 80, y: MIR.y + 240 };
+      const p1 = { x: pose.head.x + 30, y: pose.head.y - 30 };
+      const p = lerpP(p0, p1, ph);
+      const kind = i % 3;
+      const a = heartsK * Math.sin(ph * Math.PI);
+      const px = p.x + Math.sin(ph * 8 + i) * 25;
+      if (kind === 1) drawStar(px, p.y, 0.6, a); else drawHeart(px, p.y, 0.7, a);
+    }
+  }
+}
+
+// ---------- quadro ----------
+function drawDust(t, a) {
+  for (let i = 0; i < 60; i++) {
+    const x = (rand(i) * W + t * (8 + rand(i + 9) * 14)) % W;
+    const y = (rand(i + 99) * H - t * (6 + rand(i + 3) * 10) + H * 10) % H;
+    ctx.globalAlpha = a * (0.08 + 0.12 * rand(i + 5));
+    ctx.fillStyle = C.white;
+    ctx.beginPath(); ctx.arc(x, y, 1.5 + rand(i + 7) * 2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+const ZOOM_T = 14.6;
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const outro = 1 - ease(seg(t, 18.7, 19.5));
+  drawDust(t, ease(seg(t, 0, 0.9)) * outro);
+
+  // "dos nossos tempos": a câmera se afasta e mostra muita gente diante do próprio espelho
+  const z = ease(seg(t, ZOOM_T, ZOOM_T + 1.4));
+  const s = Math.min(t, ZOOM_T);
+  for (let i = 0; i < 9; i++) {
+    const col = i % 3, row = Math.floor(i / 3);
+    const main = i === 4;
+    let a = outro, sc, tx, ty;
+    if (main) {
+      sc = lerp(1, 1 / 3, z); tx = lerp(0, W / 3, z); ty = lerp(0, H / 3, z);
+    } else {
+      const d = Math.hypot(col - 1, row - 1);
+      a *= ease(seg(t, ZOOM_T + 0.9 + d * 0.35 + rand(i) * 0.3, ZOOM_T + 1.7 + d * 0.35 + rand(i) * 0.3));
+      if (a <= 0) continue;
+      sc = 1 / 3; tx = col * W / 3; ty = row * H / 3;
+    }
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(tx, ty); ctx.scale(sc, sc);
+    if (z > 0) {
+      ctx.save(); ctx.globalAlpha *= z * 0.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 6;
+      roundRect(30, 30, W - 60, H - 60, 60); ctx.stroke();
+      ctx.restore();
+    }
+    drawStory(s, main ? t : t + i * 1.37);
+    ctx.restore();
+  }
+}
+
+window.render = render;
+window.DURATION = DURATION;
+if (!location.search.includes('capture')) {
+  const t0 = performance.now();
+  (function loop() { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); })();
+} else {
+  render(0);
+}
+</script>
+</body>
+</html>
